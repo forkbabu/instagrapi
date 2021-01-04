@@ -3,7 +3,7 @@ Fast and effective Instagram Private API wrapper (public+private requests and ch
 
 Support **Python >= 3.6**
 
-Instagram API valid for 17 December 2020 (last reverse-engineering check)
+Instagram API valid for 4 January 2021 (last reverse-engineering check)
 
 [Support Chat in Telegram](https://t.me/instagrapi)
 ![](https://gist.githubusercontent.com/m8rge/4c2b36369c9f936c02ee883ca8ec89f1/raw/c03fd44ee2b63d7a2a195ff44e9bb071e87b4a40/telegram-single-path-24px.svg) and [GitHub Discussions](https://github.com/adw0rd/instagrapi/discussions)
@@ -26,11 +26,6 @@ Instagram API valid for 17 December 2020 (last reverse-engineering check)
 ### Install
 
     pip install instagrapi
-
-### Tests
-
-    python -m unittest tests
-    python -m unittest tests.ClientPublicTestCase
 
 ### Requests
 
@@ -79,8 +74,10 @@ The current types are in [types.py](/instagrapi/types.py):
 | Hashtag        | Hashtag object (id, name, picture)                                                     |
 | Collection     | Collection of medias (name, picture and list of medias)                                |
 | Comment        | Comments to Media                                                                      |
+| Story          | Story                                                                                  |
+| StoryLink      | Link (Swipe up)                                                                        |
 | StoryMention   | Mention users in Story (user, coordinates and dimensions)                              |
-| StoryBuild     | [StoryBuilder](/instagrapi/story.py) return path to photo/video and mention cordinates |
+| StoryBuild     | [StoryBuilder](/instagrapi/story.py) return path to photo/video and mention cordinats  |
 | DirectThread   | Thread (topic) with messages in Direct                                                 |
 | DirectMessage  | Message in Direct                                                                      |
 
@@ -112,7 +109,7 @@ Example:
 cl.login("instagrapi", "42")
 # cl.login_by_sessionid("peiWooShooghahdi2Eip7phohph0eeng")
 cl.set_proxy("socks5://127.0.0.1:30235")
-# cl.set_proxy("http://127.0.0.1:8080")
+# cl.set_proxy("http://username:password@127.0.0.1:8080")
 
 print(cl.get_settings())
 print(cl.user_info(cl.user_id))
@@ -166,6 +163,7 @@ Viewing and editing publications (medias)
 | media_pk(media_id: str)                            | int                | Return media_pk by media_id (e.g. 2277033926878261772_1903424587 -> 2277033926878261772) |
 | media_pk_from_code(code: str)                      | int                | Return media_pk                                               |
 | media_pk_from_url(url: str)                        | int                | Return media_pk                                               |
+| user_medias(user_id: int, amount: int = 20)        | List\[Media]       | Get list of medias by user_id                                |
 | media_info(media_pk: int)                          | Media              | Return media info                                             |
 | media_delete(media_pk: int)                        | bool               | Delete media                                                  |
 | media_edit(media_pk: int, caption: str, title: str, usertags: List[Usertag], location: Location) | dict | Change caption for media      |
@@ -246,6 +244,21 @@ Example:
 
 ```
 
+#### Media Type
+
+* 1 - Photo
+* 2 - Video (and ITGV when product_type=igtv)
+* 8 - Album
+
+#### Story
+
+| Method                                             | Return      | Description                                                   |
+| -------------------------------------------------- | ----------- | ------------------------------------------------------------- |
+| user_stories(user_id: int, amount: int = None)     | List[Story] | Get list of stories by user_id                                |
+| story_info(story_pk: int, use_cache: bool = True)  | Story       | Return story info                                             |
+| story_delete(story_pk: int)                        | bool        | Delete story                                                  |       
+
+
 #### Comment
 
 | Method                                             | Return             | Description                                                   |
@@ -262,17 +275,16 @@ View a list of a user's medias, following and followers
 
 * `user_id` - Integer ID of user, example `1903424587`
 
-| Method                                             | Return              | Description                                      |
-| -------------------------------------------------- | ------------------- | ------------------------------------------------ |
-| user_medias(user_id: int, amount: int = 20)        | List\[Media]        | Get list of medias by user_id                    |
-| user_followers(user_id: int)                       | Dict\[int, User]    | Get dict of followers users                      |
-| user_following(user_id: int)                       | Dict\[int, User]    | Get dict of following users                      |
-| user_info(user_id: int)                            | User                | Get user info                                    |
-| user_info_by_username(username: str)               | User                | Get user info by username                        |
-| user_follow(user_id: int)                          | bool                | Follow user                                      |
-| user_unfollow(user_id: int)                        | bool                | Unfollow user                                    |
-| user_id_from_username(username: str)               | int                 | Get user_id by username                          |
-| username_from_user_id(user_id: int)                | str                 | Get username by user_id                          |
+| Method                                             | Return              | Description                                                        |
+| -------------------------------------------------- | ------------------- | ------------------------------------------------------------------ |
+| user_followers(user_id: int, amount: int = 0)      | Dict\[int, User]    | Get dict of followers users (amount=0 - fetch all followers)       |
+| user_following(user_id: int, amount: int = 0)      | Dict\[int, User]    | Get dict of following users (amount=0 - fetch all following users) |
+| user_info(user_id: int)                            | User                | Get user info                                                      |
+| user_info_by_username(username: str)               | User                | Get user info by username                                          |
+| user_follow(user_id: int)                          | bool                | Follow user                                                        |
+| user_unfollow(user_id: int)                        | bool                | Unfollow user                                                      |
+| user_id_from_username(username: str)               | int                 | Get user_id by username                                            |
+| username_from_user_id(user_id: int)                | str                 | Get username by user_id                                            |
 
 Example:
 
@@ -426,11 +438,14 @@ More stories here https://www.instagram.com/surferyone/
 
 #### Collections
 
-| Method                                                       | Return             | Description                                                   |
-| ------------------------------------------------------------ | ------------------ | ------------------------------------------------------------- |
-| collections()                                                | List\[Collection]  | Get all account collections                                   |
-| collection_medias_by_name(name)                              | List\[Media]       | Get medias in collection by name                              |
-| collection_medias(collection_id, amount=21, last_media_pk=0) | List\[Media]       | Get medias in collection by collection_id; Use **amount=0** to return all medias in collection; Use **last_media_pk** to return medias by cursor |
+| Method                                                                          | Return             | Description                                      |
+| ------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------ |
+| collections()                                                                   | List\[Collection]  | Get all account collections
+| collection_pk_by_name(name: str)                                                | int                | Get collection_pk by name
+| collection_medias_by_name(name: str)                                            | List\[Media]       | Get medias in collection by name
+| collection_medias(collection_pk: int, amount: int = 21, last_media_pk: int = 0) | List\[Media]       | Get medias in collection by collection_id; Use **amount=0** to return all medias in collection; Use **last_media_pk** to return medias by cursor
+| media_save(media_id: str, collection_pk: int = None)                            | bool               | Save media to collection
+| media_unsave(media_id: str, collection_pk: int = None)                          | bool               | Unsave media from collection
 
 
 #### Insights
@@ -589,3 +604,22 @@ Automatic submission code from SMS/Email in examples [here](/examples/challenge_
 | AlbumNotDownload         | PrivateError | Raise when album not found                     |
 | AlbumUnknownFormat       | PrivateError | Raise when format of media not MP4 or JPG      |
 | AlbumConfigureError      | PrivateError | Raise when album not configured                |
+
+## Contribute
+
+First, please [install docker](https://docs.docker.com/install/) on your computer.
+Docker must be running correctly for these commands to work.
+
+*If you are using windows, please make sure your editor writes files with linefeed (`\n`) line endings.*
+
+Once you have cloned this repo, run the test suite to see if docker is set up correctly:
+
+```bash
+docker-compose run --rm test
+```
+
+You can also run just the lint using:
+
+```bash
+docker-compose run --rm lint
+```
