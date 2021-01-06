@@ -12,8 +12,8 @@ from instagrapi.exceptions import (VideoConfigureError,
                                    VideoConfigureStoryError, VideoNotDownload,
                                    VideoNotUpload)
 from instagrapi.extractors import extract_media_v1
-from instagrapi.types import (Location, Media, Story, StoryLink, StoryMention,
-                              Usertag)
+from instagrapi.types import (Location, Media, Story, StoryHashtag, StoryLink,
+                              StoryMention, Usertag)
 from instagrapi.utils import dumps
 
 
@@ -31,7 +31,7 @@ class DownloadVideoMixin:
         media_pk: int
             Unique Media ID
         folder: Path, optional
-            Directory in which you want to download the album, default is "" and will download the files to working directory
+            Directory in which you want to download the album, default is "" and will download the files to working dir.
 
         Returns
         -------
@@ -75,8 +75,7 @@ class DownloadVideoMixin:
         file_length = len(response.content)
         if content_length != file_length:
             raise VideoNotDownload(
-                'Broken file "%s" (Content-length=%s, but file length=%s)'
-                % (path, content_length, file_length)
+                f'Broken file "{path}" (Content-length={content_length}, but file length={file_length})'
             )
         with open(path, "wb") as f:
             f.write(response.content)
@@ -187,11 +186,6 @@ class UploadVideoMixin:
         thumbnail: Path = None,
         usertags: List[Usertag] = [],
         location: Location = None,
-        links: List[StoryLink] = [],
-        configure_timeout: int = 3,
-        configure_handler=None,
-        configure_exception=None,
-        to_story: bool = False,
     ) -> Media:
         """
         Upload video and configure to feed
@@ -208,15 +202,6 @@ class UploadVideoMixin:
             List of users to be tagged on this upload, default is empty list.
         location: Location, optional
             Location tag for this upload, default is None
-        links: List[StoryLink]
-            URLs for Swipe Up
-        configure_timeout: int
-            Timeout between attempt to configure media (set caption, etc), default is 3
-        configure_handler
-            Configure handler method, default is None
-        configure_exception
-            Configure exception class, default is None
-        to_story: bool, optional
 
         Returns
         -------
@@ -227,13 +212,13 @@ class UploadVideoMixin:
         if thumbnail is not None:
             thumbnail = Path(thumbnail)
         upload_id, width, height, duration, thumbnail = self.video_rupload(
-            path, thumbnail, to_story=to_story
+            path, thumbnail, to_story=False
         )
         for attempt in range(20):
             self.logger.debug(f"Attempt #{attempt} to configure Video: {path}")
-            time.sleep(configure_timeout)
+            time.sleep(3)
             try:
-                configured = (configure_handler or self.video_configure)(
+                configured = self.video_configure(
                     upload_id,
                     width,
                     height,
@@ -242,7 +227,6 @@ class UploadVideoMixin:
                     caption,
                     usertags,
                     location,
-                    links,
                 )
             except Exception as e:
                 if "Transcode not finished yet" in str(e):
@@ -258,8 +242,9 @@ class UploadVideoMixin:
                     media = configured.get("media")
                     self.expose()
                     return extract_media_v1(media)
-        raise (configure_exception or VideoConfigureError)(
-            response=self.last_response, **self.last_json
+        raise VideoConfigureError(
+            response=self.last_response,
+            **self.last_json
         )
 
     def video_configure(
@@ -272,7 +257,6 @@ class UploadVideoMixin:
         caption: str,
         usertags: List[Usertag] = [],
         location: Location = None,
-        links: List[StoryLink] = [],
     ) -> Dict:
         """
         Post Configure Video (send caption, thumbnail and more to Instagram)
@@ -295,8 +279,6 @@ class UploadVideoMixin:
             List of users to be tagged on this upload, default is empty list.
         location: Location, optional
             Location tag for this upload, default is None
-        links: List[StoryLink]
-            URLs for Swipe Up
 
         Returns
         -------
@@ -335,8 +317,9 @@ class UploadVideoMixin:
         caption: str,
         thumbnail: Path = None,
         mentions: List[StoryMention] = [],
+        location: Location = None,
         links: List[StoryLink] = [],
-        configure_timeout: int = 3,
+        hashtags: List[StoryHashtag] = [],
     ) -> Story:
         """
         Upload video as a story and configure it
@@ -351,28 +334,61 @@ class UploadVideoMixin:
             Path to thumbnail for video. When None, then thumbnail is generate automatically
         mentions: List[StoryMention], optional
             List of mentions to be tagged on this upload, default is empty list.
+        location: Location, optional
+            Location tag for this upload, default is None
         links: List[StoryLink]
             URLs for Swipe Up
-        configure_timeout: int
-            Timeout between attempt to configure media (set caption, etc), default is 3
+        hashtags: List[StoryHashtag], optional
+            List of hashtags to be tagged on this upload, default is empty list.
 
         Returns
         -------
         Story
             An object of Media class
         """
-        media = self.video_upload(
-            path,
-            caption,
-            thumbnail,
-            mentions,
-            links=links,
-            configure_timeout=configure_timeout,
-            configure_handler=self.video_configure_to_story,
-            configure_exception=VideoConfigureStoryError,
-            to_story=True,
+        path = Path(path)
+        if thumbnail is not None:
+            thumbnail = Path(thumbnail)
+        upload_id, width, height, duration, thumbnail = self.video_rupload(
+            path, thumbnail, to_story=True
         )
-        return Story(links=links, mentions=mentions, **media.dict())
+        for attempt in range(20):
+            self.logger.debug(f"Attempt #{attempt} to configure Video: {path}")
+            time.sleep(3)
+            try:
+                configured = self.video_configure_to_story(
+                    upload_id,
+                    width,
+                    height,
+                    duration,
+                    thumbnail,
+                    caption,
+                    mentions,
+                    location,
+                    links,
+                    hashtags,
+                )
+            except Exception as e:
+                if "Transcode not finished yet" in str(e):
+                    """
+                    Response 202 status:
+                    {"message": "Transcode not finished yet.", "status": "fail"}
+                    """
+                    time.sleep(10)
+                    continue
+                raise e
+            if configured:
+                media = configured.get("media")
+                self.expose()
+                return Story(
+                    links=links,
+                    mentions=mentions,
+                    hashtags=hashtags,
+                    **extract_media_v1(media).dict()
+                )
+        raise VideoConfigureStoryError(
+            response=self.last_response, **self.last_json
+        )
 
     def video_configure_to_story(
         self,
@@ -385,6 +401,7 @@ class UploadVideoMixin:
         mentions: List[StoryMention] = [],
         location: Location = None,
         links: List[StoryLink] = [],
+        hashtags: List[StoryHashtag] = [],
     ) -> Dict:
         """
         Story Configure for Photo
@@ -409,6 +426,8 @@ class UploadVideoMixin:
             Location tag for this upload, default is None
         links: List[StoryLink]
             URLs for Swipe Up
+        hashtags: List[StoryHashtag], optional
+            List of hashtags to be tagged on this upload, default is empty list.
 
         Returns
         -------
@@ -452,15 +471,23 @@ class UploadVideoMixin:
             # "attempt_id": str(uuid4()),
             "device": self.device,
             "length": duration,
-            "implicit_location": {"media_location": {"lat": 0.0, "lng": 0.0}},
+            "implicit_location": {},
             "clips": [{"length": duration, "source_type": "4"}],
             "extra": {"source_width": width, "source_height": height},
             "audio_muted": False,
             "poster_frame_index": 0,
         }
+        if location:
+            assert isinstance(location, Location), \
+                f'location must been Location (not {type(location)})'
+            loc = self.location_build(location)
+            data["implicit_location"] = {
+                "media_location": {"lat": loc.lat, "lng": loc.lng}
+            }
         if links:
             links = [link.dict() for link in links]
             data["story_cta"] = dumps([{"links": links}])
+        tap_models = []
         if mentions:
             reel_mentions = []
             text_metadata = []
@@ -491,7 +518,25 @@ class UploadVideoMixin:
                     }
                 )
             data["text_metadata"] = dumps(text_metadata)
-            data["tap_models"] = data["reel_mentions"] = dumps(reel_mentions)
+            data["reel_mentions"] = dumps(reel_mentions)
+            tap_models.extend(reel_mentions)
+        if hashtags:
+            for mention in hashtags:
+                item = {
+                    "x": mention.x,
+                    "y": mention.y,
+                    "z": 0,
+                    "width": mention.width,
+                    "height": mention.height,
+                    "rotation": 0.0,
+                    "type": "hashtag",
+                    "tag_name": mention.hashtag.name,
+                    "is_sticker": True,
+                    "tap_state": 0,
+                    "tap_state_str_id": "hashtag_sticker_gradient"
+                }
+                tap_models.append(item)
+        data["tap_models"] = dumps(tap_models)
         return self.private_request(
             "media/configure_to_story/?video=1", self.with_default_data(data)
         )
