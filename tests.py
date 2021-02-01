@@ -8,6 +8,7 @@ from json.decoder import JSONDecodeError
 from pathlib import Path
 
 from instagrapi import Client
+from instagrapi.story import StoryBuilder
 from instagrapi.types import (
     Account,
     Collection,
@@ -19,18 +20,20 @@ from instagrapi.types import (
     Media,
     MediaOembed,
     Story,
+    StoryLink,
+    StoryLocation,
     StoryMention,
     StoryHashtag,
-    StoryLink,
+    StorySticker,
     User,
     UserShort,
     Usertag
 )
-from instagrapi.story import StoryBuilder
 from instagrapi.zones import UTC
 
 ACCOUNT_USERNAME = os.environ.get("IG_USERNAME", "instagrapi2")
 ACCOUNT_PASSWORD = os.environ.get("IG_PASSWORD", "yoa5af6deeRujeec")
+ACCOUNT_SESSIONID = os.environ.get("IG_SESSIONID", "")
 
 REQUIRED_MEDIA_FIELDS = [
     "pk", "taken_at", "id", "media_type", "code", "thumbnail_url", "location",
@@ -85,19 +88,23 @@ class ClientPrivateTestCase(BaseClientMixin, unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         filename = f'/tmp/instagrapi_tests_client_settings_{ACCOUNT_USERNAME}.json'
+        self.api = Client()
         try:
-            settings = json.load(open(filename))
+            settings = self.api.load_settings(filename)
         except FileNotFoundError:
             settings = {}
         except JSONDecodeError as e:
             print('JSONDecodeError when read stored client settings. Use empty settings')
             print(str(e))
             settings = {}
-        self.api = Client(settings)
+        self.api.set_settings(settings)
         self.api.request_timeout = 1
         self.set_proxy_if_exists()
-        self.api.login(ACCOUNT_USERNAME, ACCOUNT_PASSWORD)
-        json.dump(self.api.get_settings(), open(filename, 'w'))
+        if ACCOUNT_SESSIONID:
+            self.api.login_by_sessionid(ACCOUNT_SESSIONID)
+        else:
+            self.api.login(ACCOUNT_USERNAME, ACCOUNT_PASSWORD)
+        self.api.dump_settings(filename)
         super().__init__(*args, **kwargs)
 
 
@@ -426,6 +433,13 @@ class ClientMediaTestCase(ClientPrivateTestCase):
         media = self.api.media_info_v1(media_pk)  # refresh after unlike
         self.assertEqual(media.like_count, like_count)
 
+    def test_media_likers(self):
+        media = self.api.user_medias(self.api.user_id, amount=3)[-1]
+        self.assertIsInstance(media, Media)
+        likers = self.api.media_likers(media.pk)
+        self.assertTrue(len(likers) > 0)
+        self.assertIsInstance(likers[0], UserShort)
+
 
 class ClientCommentTestCase(ClientPrivateTestCase):
 
@@ -467,7 +481,7 @@ class ClientCommentTestCase(ClientPrivateTestCase):
             self.assertEqual(comment[key], val)
         self.assertIn("pk", comment)
         # The comment was written no more than 20 seconds ago
-        self.assertTrue((now - comment["created_at_utc"]).seconds <= 20)
+        self.assertTrue((now - comment["created_at_utc"]).seconds <= 60)
         user_fields = comment['user'].keys()
         for field in ["pk", "username", "full_name", "profile_pic_url"]:
             self.assertIn(field, user_fields)
@@ -894,9 +908,7 @@ class ClientDirectTestCase(ClientPrivateTestCase):
         # messages
         messages = self.api.direct_messages(thread.id, 2)
         self.assertTrue(3 > len(messages) > 0)
-        self.assertTrue(
-            thread.is_seen(self.api.user_id)
-        )
+        # self.assertTrue(thread.is_seen(self.api.user_id))
         message = messages[0]
         self.assertIsInstance(message, DirectMessage)
         adw0rd = self.api.user_id_from_username('adw0rd')
@@ -1112,18 +1124,39 @@ class ClientStoryTestCase(ClientPrivateTestCase):
         self.assertIsInstance(path, Path)
         caption = 'Test photo caption'
         adw0rd = self.api.user_info_by_username('adw0rd')
-        dhbastards = self.api.hashtag_info('dhbastards')
         self.assertIsInstance(adw0rd, User)
         mentions = [StoryMention(user=adw0rd)]
         links = [StoryLink(webUri='https://adw0rd.com/')]
-        hashtags = [StoryHashtag(hashtag=dhbastards)]
+        hashtags = [
+            StoryHashtag(hashtag=self.api.hashtag_info('dhbastards'))
+        ]
+        locations = [
+            StoryLocation(
+                location=Location(
+                    pk=150300262230285,
+                    name='Blaues Wunder (Dresden)',
+                )
+            )
+        ]
+        stickers = [
+            StorySticker(
+                id="Igjf05J559JWuef4N5",
+                type="gif",
+                x=0.5,
+                y=0.5,
+                width=0.4,
+                height=0.08
+            )
+        ]
         try:
             story = self.api.photo_upload_to_story(
                 path,
                 caption,
                 mentions=mentions,
                 links=links,
-                hashtags=hashtags
+                hashtags=hashtags,
+                locations=locations,
+                stickers=stickers
             )
             self.assertIsInstance(story, Story)
             self.assertTrue(story)
@@ -1139,11 +1172,20 @@ class ClientStoryTestCase(ClientPrivateTestCase):
         self.assertIsInstance(path, Path)
         caption = 'Test video caption'
         adw0rd = self.api.user_info_by_username('adw0rd')
-        dhbastards = self.api.hashtag_info('dhbastards')
         self.assertIsInstance(adw0rd, User)
         mentions = [StoryMention(user=adw0rd)]
         links = [StoryLink(webUri='https://adw0rd.com/')]
-        hashtags = [StoryHashtag(hashtag=dhbastards)]
+        hashtags = [
+            StoryHashtag(hashtag=self.api.hashtag_info('dhbastards'))
+        ]
+        locations = [
+            StoryLocation(
+                location=Location(
+                    pk=150300262230285,
+                    name='Blaues Wunder (Dresden)',
+                )
+            )
+        ]
         try:
             buildout = StoryBuilder(
                 path, caption, mentions,
@@ -1154,7 +1196,8 @@ class ClientStoryTestCase(ClientPrivateTestCase):
                 caption,
                 mentions=buildout.mentions,
                 links=links,
-                hashtags=hashtags
+                hashtags=hashtags,
+                locations=locations,
             )
             self.assertIsInstance(story, Story)
             self.assertTrue(story)
@@ -1170,14 +1213,63 @@ class ClientStoryTestCase(ClientPrivateTestCase):
         self.assertIsInstance(story, Story)
         for field in REQUIRED_STORY_FIELDS:
             self.assertTrue(hasattr(story, field))
+        stories = self.api.user_stories(
+            self.api.user_id_from_username("adw0rd")
+        )
+        self.assertIsInstance(stories, list)
+
+    def test_extract_user_stories(self):
+        user_id = self.api.user_id_from_username('dhbastards')
+        stories_v1 = self.api.user_stories_v1(user_id, amount=2)
+        stories_gql = self.api.user_stories_gql(user_id, amount=2)
+        self.assertEqual(len(stories_v1), 2)
+        self.assertIsInstance(stories_v1[0], Story)
+        self.assertEqual(len(stories_gql), 2)
+        self.assertIsInstance(stories_gql[0], Story)
+        for i, gql in enumerate(stories_gql[:2]):
+            gql = gql.dict()
+            v1 = stories_v1[i].dict()
+            for f in REQUIRED_STORY_FIELDS:
+                gql_val, v1_val = gql[f], v1[f]
+                is_video = v1.get('video_duration') > 0
+                if f == 'video_url' and is_video:
+                    gql_val = gql[f].path.rsplit('.', 1)[1]
+                    v1_val = v1[f].path.rsplit('.', 1)[1]
+                elif f == "thumbnail_url":
+                    self.assertIn(".jpg", gql_val)
+                    self.assertIn(".jpg", v1_val)
+                    continue
+                elif f == "user":
+                    gql_val.pop('full_name')
+                    v1_val.pop('full_name')
+                elif f == "mentions":
+                    for item in [*gql_val, *v1_val]:
+                        item['user'].pop('pk')
+                        item['user'].pop('profile_pic_url')
+                        item.pop('width')
+                        item.pop('height')
+                        item['x'] = round(item['x'], 4)
+                        item['y'] = round(item['y'], 4)
+                elif f == "links":
+                    # [{'webUri': HttpUrl('https://youtu.be/x3GYpar-e64', scheme='https', host='youtu.be', tld='be', host_type='domain', path='/x3GYpar-e64')}]
+                    # [{'webUri': HttpUrl('https://l.instagram.com/?u=https%3A%2F%2Fyoutu.be%2Fx3GYpar-e64&e=ATM59nvUNmptw8vUsyoX835T....}]
+                    self.assertEqual(len(v1_val), len(gql_val))
+                    if gql_val:
+                        self.assertIn(
+                            gql_val[0]['webUri'].host,
+                            v1_val[0]['webUri'].query
+                        )
+                    continue
+                self.assertEqual(gql_val, v1_val)
 
     def test_story_info(self):
         user_id = self.api.user_id_from_username("dhbastards")
-        stories = self.api.user_stories(user_id, 1)
+        stories = self.api.user_stories(user_id, amount=1)
         story = self.api.story_info(stories[0].pk)
         self.assertIsInstance(story, Story)
         story = self.api.story_info(stories[0].id)
         self.assertIsInstance(story, Story)
+        self.assertTrue(self.api.story_seen([story.pk]))
 
 
 if __name__ == '__main__':

@@ -14,7 +14,8 @@ from instagrapi.exceptions import (PhotoConfigureError,
                                    PhotoConfigureStoryError, PhotoNotUpload)
 from instagrapi.extractors import extract_media_v1
 from instagrapi.types import (Location, Media, Story, StoryHashtag, StoryLink,
-                              StoryMention, Usertag)
+                              StoryLocation, StoryMention, StorySticker,
+                              Usertag)
 from instagrapi.utils import dumps
 
 try:
@@ -263,9 +264,10 @@ class UploadPhotoMixin:
         caption: str,
         upload_id: str = "",
         mentions: List[StoryMention] = [],
-        location: Location = None,
+        locations: List[StoryLocation] = [],
         links: List[StoryLink] = [],
         hashtags: List[StoryHashtag] = [],
+        stickers: List[StorySticker] = [],
     ) -> Story:
         """
         Upload photo as a story and configure it
@@ -280,12 +282,14 @@ class UploadPhotoMixin:
             Unique upload_id (String). When None, then generate automatically. Example from video.video_configure
         mentions: List[StoryMention], optional
             List of mentions to be tagged on this upload, default is empty list.
-        location: Location, optional
-            Location tag for this upload, default is None
+        locations: List[StoryLocation], optional
+            List of locations to be tagged on this upload, default is empty list.
         links: List[StoryLink]
             URLs for Swipe Up
         hashtags: List[StoryHashtag], optional
             List of hashtags to be tagged on this upload, default is empty list.
+        stickers: List[StorySticker], optional
+            List of stickers to be tagged on this upload, default is empty list.
 
         Returns
         -------
@@ -303,9 +307,10 @@ class UploadPhotoMixin:
                 height,
                 caption,
                 mentions,
-                location,
+                locations,
                 links,
                 hashtags,
+                stickers,
             ):
                 media = self.last_json.get("media")
                 self.expose()
@@ -313,6 +318,8 @@ class UploadPhotoMixin:
                     links=links,
                     mentions=mentions,
                     hashtags=hashtags,
+                    locations=locations,
+                    stickers=stickers,
                     **extract_media_v1(media).dict()
                 )
         raise PhotoConfigureStoryError(
@@ -326,9 +333,11 @@ class UploadPhotoMixin:
         height: int,
         caption: str,
         mentions: List[StoryMention] = [],
-        location: Location = None,
+        locations: List[StoryLocation] = [],
         links: List[StoryLink] = [],
         hashtags: List[StoryHashtag] = [],
+        stickers: List[StorySticker] = [],
+        extra_data: Dict[str, str] = {},
     ) -> Dict:
         """
         Post configure photo
@@ -345,12 +354,16 @@ class UploadPhotoMixin:
             Media caption
         mentions: List[StoryMention], optional
             List of mentions to be tagged on this upload, default is empty list.
-        location: Location, optional
-            Location tag for this upload, default is None
+        locations: List[StoryLocation], optional
+            List of locations to be tagged on this upload, default is empty list.
         links: List[StoryLink]
             URLs for Swipe Up
         hashtags: List[StoryHashtag], optional
             List of hashtags to be tagged on this upload, default is empty list.
+        stickers: List[StorySticker], optional
+            List of stickers to be tagged on this upload, default is empty list.
+        extra_data: List[str, str], optional
+            Dict of extra data, if you need to add your params, like {"share_to_facebook": 1}.
 
         Returns
         -------
@@ -358,6 +371,7 @@ class UploadPhotoMixin:
             A dictionary of response from the call
         """
         timestamp = int(time.time())
+        story_sticker_ids = []
         data = {
             "text_metadata": '[{"font_size":40.0,"scale":1.0,"width":611.0,"height":169.0,"x":0.51414347,"y":0.8487708,"rotation":0.0}]',
             "supported_capabilities_new": json.dumps(config.SUPPORTED_CAPABILITIES),
@@ -366,7 +380,7 @@ class UploadPhotoMixin:
             "scene_capture_type": "",
             "timezone_offset": "10800",
             "client_shared_at": str(timestamp - 5),  # 5 seconds ago
-            "story_sticker_ids": "time_sticker_digital",
+            "story_sticker_ids": "",
             "media_folder": "Camera",
             "configure_mode": "1",
             "source_type": "4",
@@ -378,7 +392,6 @@ class UploadPhotoMixin:
             "upload_id": upload_id,
             "client_timestamp": str(timestamp),
             "device": self.device,
-            "implicit_location": {},
             "edits": {
                 "crop_original_size": [width * 1.0, height * 1.0],
                 "crop_center": [0.0, 0.0],
@@ -386,17 +399,12 @@ class UploadPhotoMixin:
             },
             "extra": {"source_width": width, "source_height": height},
         }
-        if location:
-            assert isinstance(location, Location), \
-                f'location must been Location (not {type(location)})'
-            loc = self.location_build(location)
-            data["implicit_location"] = {
-                "media_location": {"lat": loc.lat, "lng": loc.lng}
-            }
+        data.update(extra_data)
         if links:
             links = [link.dict() for link in links]
             data["story_cta"] = dumps([{"links": links}])
         tap_models = []
+        static_models = []
         if mentions:
             reel_mentions = [
                 {
@@ -416,6 +424,7 @@ class UploadPhotoMixin:
             data["reel_mentions"] = json.dumps(reel_mentions)
             tap_models.extend(reel_mentions)
         if hashtags:
+            story_sticker_ids.append("hashtag_sticker")
             for mention in hashtags:
                 item = {
                     "x": mention.x,
@@ -431,7 +440,43 @@ class UploadPhotoMixin:
                     "tap_state_str_id": "hashtag_sticker_gradient"
                 }
                 tap_models.append(item)
+        if locations:
+            story_sticker_ids.append("location_sticker")
+            for mention in locations:
+                mention.location = self.location_complete(mention.location)
+                item = {
+                    "x": mention.x,
+                    "y": mention.y,
+                    "z": 0,
+                    "width": mention.width,
+                    "height": mention.height,
+                    "rotation": 0.0,
+                    "type": "location",
+                    "location_id": str(mention.location.pk),
+                    "is_sticker": True,
+                    "tap_state": 0,
+                    "tap_state_str_id": "location_sticker_vibrant"
+                }
+                tap_models.append(item)
+        if stickers:
+            for sticker in stickers:
+                str_id = sticker.id  # "gif_Igjf05J559JWuef4N5"
+                static_models.append({
+                    "x": sticker.x,
+                    "y": sticker.y,
+                    "z": sticker.z,
+                    "width": sticker.width,
+                    "height": sticker.height,
+                    "rotation": sticker.rotation,
+                    "str_id": str_id,
+                    "sticker_type": sticker.type,
+                })
+                story_sticker_ids.append(str_id)
+                if sticker.type == "gif":
+                    data["has_animated_sticker"] = "1"
         data["tap_models"] = dumps(tap_models)
+        data["static_models"] = dumps(static_models)
+        data["story_sticker_ids"] = dumps(story_sticker_ids)
         return self.private_request(
             "media/configure_to_story/", self.with_default_data(data)
         )

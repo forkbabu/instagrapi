@@ -49,6 +49,7 @@ class UserShort(BaseModel):
     profile_pic_url: Optional[HttpUrl]
     # is_private: bool
     # is_verified: bool
+    stories: List = []
 
 
 class Usertag(BaseModel):
@@ -151,6 +152,25 @@ class StoryHashtag(BaseModel):
     height: Optional[float]
 
 
+class StoryLocation(BaseModel):
+    location: Location
+    x: Optional[float]
+    y: Optional[float]
+    width: Optional[float]
+    height: Optional[float]
+
+
+class StorySticker(BaseModel):
+    id: str
+    type: Optional[str] = 'gif'
+    x: float
+    y: float
+    z: Optional[int] = 1000005
+    width: float
+    height: float
+    rotation: Optional[float] = 0.0
+
+
 class StoryBuild(BaseModel):
     mentions: List[StoryMention]
     path: FilePath
@@ -174,6 +194,8 @@ class Story(BaseModel):
     mentions: List[StoryMention]
     links: List[StoryLink]
     hashtags: List[StoryHashtag]
+    locations: List[StoryLocation]
+    stickers: List[StorySticker]
 
 
 class DirectMessage(BaseModel):

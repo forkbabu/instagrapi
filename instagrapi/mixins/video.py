@@ -13,7 +13,8 @@ from instagrapi.exceptions import (VideoConfigureError,
                                    VideoNotUpload)
 from instagrapi.extractors import extract_media_v1
 from instagrapi.types import (Location, Media, Story, StoryHashtag, StoryLink,
-                              StoryMention, Usertag)
+                              StoryLocation, StoryMention, StorySticker,
+                              Usertag)
 from instagrapi.utils import dumps
 
 
@@ -317,9 +318,10 @@ class UploadVideoMixin:
         caption: str,
         thumbnail: Path = None,
         mentions: List[StoryMention] = [],
-        location: Location = None,
+        locations: List[StoryLocation] = [],
         links: List[StoryLink] = [],
         hashtags: List[StoryHashtag] = [],
+        stickers: List[StorySticker] = [],
     ) -> Story:
         """
         Upload video as a story and configure it
@@ -334,12 +336,14 @@ class UploadVideoMixin:
             Path to thumbnail for video. When None, then thumbnail is generate automatically
         mentions: List[StoryMention], optional
             List of mentions to be tagged on this upload, default is empty list.
-        location: Location, optional
-            Location tag for this upload, default is None
+        locations: List[StoryLocation], optional
+            List of locations to be tagged on this upload, default is empty list.
         links: List[StoryLink]
             URLs for Swipe Up
         hashtags: List[StoryHashtag], optional
             List of hashtags to be tagged on this upload, default is empty list.
+        stickers: List[StorySticker], optional
+            List of stickers to be tagged on this upload, default is empty list.
 
         Returns
         -------
@@ -364,9 +368,10 @@ class UploadVideoMixin:
                     thumbnail,
                     caption,
                     mentions,
-                    location,
+                    locations,
                     links,
                     hashtags,
+                    stickers,
                 )
             except Exception as e:
                 if "Transcode not finished yet" in str(e):
@@ -384,6 +389,8 @@ class UploadVideoMixin:
                     links=links,
                     mentions=mentions,
                     hashtags=hashtags,
+                    locations=locations,
+                    stickers=stickers,
                     **extract_media_v1(media).dict()
                 )
         raise VideoConfigureStoryError(
@@ -399,9 +406,11 @@ class UploadVideoMixin:
         thumbnail: Path,
         caption: str,
         mentions: List[StoryMention] = [],
-        location: Location = None,
+        locations: List[StoryLocation] = [],
         links: List[StoryLink] = [],
         hashtags: List[StoryHashtag] = [],
+        stickers: List[StorySticker] = [],
+        extra_data: Dict[str, str] = {},
     ) -> Dict:
         """
         Story Configure for Photo
@@ -422,12 +431,16 @@ class UploadVideoMixin:
             Media caption
         mentions: List[StoryMention], optional
             List of mentions to be tagged on this upload, default is empty list.
-        location: Location, optional
-            Location tag for this upload, default is None
+        locations: List[StoryLocation], optional
+            List of locations to be tagged on this upload, default is empty list.
         links: List[StoryLink]
             URLs for Swipe Up
         hashtags: List[StoryHashtag], optional
             List of hashtags to be tagged on this upload, default is empty list.
+        stickers: List[StorySticker], optional
+            List of stickers to be tagged on this upload, default is empty list.
+        extra_data: List[str, str], optional
+            Dict of extra data, if you need to add your params, like {"share_to_facebook": 1}.
 
         Returns
         -------
@@ -435,6 +448,7 @@ class UploadVideoMixin:
             A dictionary of response from the call
         """
         timestamp = int(time.time())
+        story_sticker_ids = []
         data = {
             "supported_capabilities_new": dumps(config.SUPPORTED_CAPABILITIES),
             "has_original_sound": "1",
@@ -453,6 +467,7 @@ class UploadVideoMixin:
             "client_shared_at": str(timestamp - 7),  # 7 seconds ago
             "imported_taken_at": str(timestamp - 5 * 24 * 3600),  # 5 days ago
             "date_time_original": time.strftime("%Y%m%dT%H%M%S.000Z", time.localtime()),
+            "story_sticker_ids": "",
             "media_folder": "Camera",
             "configure_mode": "1",
             "source_type": "4",
@@ -471,23 +486,17 @@ class UploadVideoMixin:
             # "attempt_id": str(uuid4()),
             "device": self.device,
             "length": duration,
-            "implicit_location": {},
             "clips": [{"length": duration, "source_type": "4"}],
             "extra": {"source_width": width, "source_height": height},
             "audio_muted": False,
             "poster_frame_index": 0,
         }
-        if location:
-            assert isinstance(location, Location), \
-                f'location must been Location (not {type(location)})'
-            loc = self.location_build(location)
-            data["implicit_location"] = {
-                "media_location": {"lat": loc.lat, "lng": loc.lng}
-            }
+        data.update(extra_data)
         if links:
             links = [link.dict() for link in links]
             data["story_cta"] = dumps([{"links": links}])
         tap_models = []
+        static_models = []
         if mentions:
             reel_mentions = []
             text_metadata = []
@@ -521,6 +530,7 @@ class UploadVideoMixin:
             data["reel_mentions"] = dumps(reel_mentions)
             tap_models.extend(reel_mentions)
         if hashtags:
+            story_sticker_ids.append("hashtag_sticker")
             for mention in hashtags:
                 item = {
                     "x": mention.x,
@@ -536,7 +546,43 @@ class UploadVideoMixin:
                     "tap_state_str_id": "hashtag_sticker_gradient"
                 }
                 tap_models.append(item)
+        if locations:
+            story_sticker_ids.append("location_sticker")
+            for mention in locations:
+                mention.location = self.location_complete(mention.location)
+                item = {
+                    "x": mention.x,
+                    "y": mention.y,
+                    "z": 0,
+                    "width": mention.width,
+                    "height": mention.height,
+                    "rotation": 0.0,
+                    "type": "location",
+                    "location_id": str(mention.location.pk),
+                    "is_sticker": True,
+                    "tap_state": 0,
+                    "tap_state_str_id": "location_sticker_vibrant"
+                }
+                tap_models.append(item)
+        if stickers:
+            for sticker in stickers:
+                str_id = sticker.id  # "gif_Igjf05J559JWuef4N5"
+                static_models.append({
+                    "x": sticker.x,
+                    "y": sticker.y,
+                    "z": sticker.z,
+                    "width": sticker.width,
+                    "height": sticker.height,
+                    "rotation": sticker.rotation,
+                    "str_id": str_id,
+                    "sticker_type": sticker.type,
+                })
+                story_sticker_ids.append(str_id)
+                if sticker.type == "gif":
+                    data["has_animated_sticker"] = "1"
         data["tap_models"] = dumps(tap_models)
+        data["static_models"] = dumps(static_models)
+        data["story_sticker_ids"] = dumps(story_sticker_ids)
         return self.private_request(
             "media/configure_to_story/?video=1", self.with_default_data(data)
         )
@@ -572,4 +618,5 @@ def analyze_video(path: Path, thumbnail: Path = None) -> tuple:
         print(f'Generating thumbnail "{thumbnail}"...')
         video.save_frame(thumbnail, t=(video.duration / 2))
     # duration = round(video.duration + 0.001, 3)
+    video.close()
     return width, height, video.duration, thumbnail
