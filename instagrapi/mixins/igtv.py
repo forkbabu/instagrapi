@@ -139,6 +139,7 @@ class UploadIGTVMixin:
         )
         self.request_log(response)
         if response.status_code != 200:
+            print(response.status_code)
             raise IGTVNotUpload(response=self.last_response, **self.last_json)
         igtv_data = open(path, "rb").read()
         igtv_len = str(len(igtv_data))
